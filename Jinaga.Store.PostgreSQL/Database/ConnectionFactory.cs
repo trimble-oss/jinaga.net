@@ -92,6 +92,13 @@ namespace Jinaga.Store.PostgreSQL.Database
             return result == null || result == DBNull.Value ? "" : result.ToString();
         }
 
+        public static int? ExecuteScalarInt(this NpgsqlConnection conn, string sql, params object[] parameters)
+        {
+            var result = ExecuteScalar(conn, sql, parameters);
+            if (result == null || result == DBNull.Value) return null;
+            return Convert.ToInt32(result);
+        }
+
         public static IEnumerable<T> ExecuteQuery<T>(this NpgsqlConnection conn, string sql, params object[] parameters) where T : new()
         {
             var results = new List<T>();

@@ -11,6 +11,21 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: jinaga
+          POSTGRES_PASSWORD: jinaga_test
+          POSTGRES_DB: jinaga_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jinaga -d jinaga_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v4
       with:
@@ -37,9 +52,14 @@ jobs:
         dotnet build Jinaga.Tool --no-restore
         dotnet build Jinaga.Store.SQLite --no-restore
         dotnet build Jinaga.Store.SQLite.Test --no-restore
+        dotnet build Jinaga.Store.PostgreSQL --no-restore
+        dotnet build Jinaga.Store.PostgreSQL.Test --no-restore
         dotnet build Jinaga.Maui --no-restore
 
     - name: Test
+      env:
+        JINAGA_POSTGRES_CONNECTION: "Host=localhost;Port=5432;Database=jinaga_test;Username=jinaga;Password=jinaga_test"
       run: |
         dotnet test Jinaga.Test --no-build --verbosity normal
         dotnet test Jinaga.Store.SQLite.Test --no-build --verbosity normal
+        dotnet test Jinaga.Store.PostgreSQL.Test --no-build --verbosity normal

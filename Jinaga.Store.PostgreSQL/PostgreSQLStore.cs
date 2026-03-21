@@ -50,33 +50,33 @@ namespace Jinaga.Store.PostgreSQL
                         (conn) =>
                         {
                             // Select or insert into FactType table. Gets a FactTypeId
-                            var factTypeId = conn.ExecuteScalarString(
+                            var factTypeId = conn.ExecuteScalarInt(
                                 "SELECT fact_type_id FROM fact_type WHERE name = @p0",
                                 envelope.Fact.Reference.Type);
-                            if (factTypeId == "")
+                            if (factTypeId == null)
                             {
                                 conn.ExecuteNonQuery(
                                     "INSERT INTO fact_type (name) VALUES (@p0) ON CONFLICT DO NOTHING",
                                     envelope.Fact.Reference.Type);
-                                factTypeId = conn.ExecuteScalarString(
+                                factTypeId = conn.ExecuteScalarInt(
                                     "SELECT fact_type_id FROM fact_type WHERE name = @p0",
                                     envelope.Fact.Reference.Type);
                             }
 
                             // Select or insert into Fact table. Gets a FactId
-                            var factId = conn.ExecuteScalarString(
+                            var factId = conn.ExecuteScalarInt(
                                 "SELECT fact_id FROM fact WHERE hash = @p0 AND fact_type_id = @p1",
-                                envelope.Fact.Reference.Hash, factTypeId);
-                            if (factId == "")
+                                envelope.Fact.Reference.Hash, factTypeId.Value);
+                            if (factId == null)
                             {
                                 newFacts = newFacts.Add(envelope.Fact);
                                 string data = Fact.Canonicalize(envelope.Fact.Fields, envelope.Fact.Predecessors);
                                 conn.ExecuteNonQuery(
                                     "INSERT INTO fact (fact_type_id, hash, data) VALUES (@p0, @p1, @p2) ON CONFLICT DO NOTHING",
-                                    factTypeId, envelope.Fact.Reference.Hash, data);
-                                factId = conn.ExecuteScalarString(
+                                    factTypeId.Value, envelope.Fact.Reference.Hash, data);
+                                factId = conn.ExecuteScalarInt(
                                     "SELECT fact_id FROM fact WHERE hash = @p0 AND fact_type_id = @p1",
-                                    envelope.Fact.Reference.Hash, factTypeId);
+                                    envelope.Fact.Reference.Hash, factTypeId.Value);
 
                                 // Insert into the outbound_queue table
                                 if (queue)
@@ -85,41 +85,41 @@ namespace Jinaga.Store.PostgreSQL
                                     string graphData = graphToQueue.ToJson();
                                     conn.ExecuteNonQuery(
                                         "INSERT INTO outbound_queue (fact_id, graph_data) VALUES (@p0, @p1)",
-                                        factId, graphData);
+                                        factId.Value, graphData);
                                 }
 
                                 // For each predecessor of the inserted fact
                                 foreach (var predecessor in envelope.Fact.Predecessors)
                                 {
                                     // Select or insert into Role table. Gets a RoleId
-                                    var roleId = conn.ExecuteScalarString(
+                                    var roleId = conn.ExecuteScalarInt(
                                         "SELECT role_id FROM role WHERE defining_fact_type_id = @p0 AND name = @p1",
-                                        factTypeId, predecessor.Role);
-                                    if (roleId == "")
+                                        factTypeId.Value, predecessor.Role);
+                                    if (roleId == null)
                                     {
                                         conn.ExecuteNonQuery(
                                             "INSERT INTO role (defining_fact_type_id, name) VALUES (@p0, @p1) ON CONFLICT DO NOTHING",
-                                            factTypeId, predecessor.Role);
-                                        roleId = conn.ExecuteScalarString(
+                                            factTypeId.Value, predecessor.Role);
+                                        roleId = conn.ExecuteScalarInt(
                                             "SELECT role_id FROM role WHERE defining_fact_type_id = @p0 AND name = @p1",
-                                            factTypeId, predecessor.Role);
+                                            factTypeId.Value, predecessor.Role);
                                     }
 
                                     // Insert into Edge and Ancestor tables
-                                    string predecessorFactId;
+                                    int predecessorFactId;
                                     switch (predecessor)
                                     {
                                         case PredecessorSingle s:
                                             predecessorFactId = GetFactId(conn, s.Reference);
-                                            InsertEdge(conn, roleId, factId, predecessorFactId);
-                                            InsertAncestors(conn, factId, predecessorFactId);
+                                            InsertEdge(conn, roleId.Value, factId.Value, predecessorFactId);
+                                            InsertAncestors(conn, factId.Value, predecessorFactId);
                                             break;
                                         case PredecessorMultiple m:
                                             foreach (var predecessorMultipleReference in m.References)
                                             {
                                                 predecessorFactId = GetFactId(conn, predecessorMultipleReference);
-                                                InsertEdge(conn, roleId, factId, predecessorFactId);
-                                                InsertAncestors(conn, factId, predecessorFactId);
+                                                InsertEdge(conn, roleId.Value, factId.Value, predecessorFactId);
+                                                InsertAncestors(conn, factId.Value, predecessorFactId);
                                             }
                                             break;
                                         default:
@@ -131,15 +131,15 @@ namespace Jinaga.Store.PostgreSQL
                             foreach (var signature in envelope.Signatures)
                             {
                                 // Select or insert into the public_key table. Gets a public_key_id.
-                                var publicKeyId = conn.ExecuteScalarString(
+                                var publicKeyId = conn.ExecuteScalarInt(
                                     "SELECT public_key_id FROM public_key WHERE public_key = @p0",
                                     signature.PublicKey);
-                                if (publicKeyId == "")
+                                if (publicKeyId == null)
                                 {
                                     conn.ExecuteNonQuery(
                                         "INSERT INTO public_key (public_key) VALUES (@p0) ON CONFLICT DO NOTHING",
                                         signature.PublicKey);
-                                    publicKeyId = conn.ExecuteScalarString(
+                                    publicKeyId = conn.ExecuteScalarInt(
                                         "SELECT public_key_id FROM public_key WHERE public_key = @p0",
                                         signature.PublicKey);
                                 }
@@ -147,7 +147,7 @@ namespace Jinaga.Store.PostgreSQL
                                 // Insert into the signature table if it doesn't already exist.
                                 conn.ExecuteNonQuery(
                                     "INSERT INTO signature (fact_id, public_key_id, signature) VALUES (@p0, @p1, @p2) ON CONFLICT DO NOTHING",
-                                    factId, publicKeyId, signature.Signature);
+                                    factId.Value, publicKeyId.Value, signature.Signature);
                             }
                             return 0;
                         }
@@ -158,31 +158,32 @@ namespace Jinaga.Store.PostgreSQL
             }
         }
 
-        private string GetFactId(NpgsqlConnection conn, FactReference factReference)
+        private int GetFactId(NpgsqlConnection conn, FactReference factReference)
         {
-            var factTypeId = conn.ExecuteScalarString(
+            var factTypeId = conn.ExecuteScalarInt(
                 "SELECT fact_type_id FROM fact_type WHERE name = @p0",
                 factReference.Type);
 
-            return conn.ExecuteScalarString(
+            var factId = conn.ExecuteScalarInt(
                 "SELECT fact_id FROM fact WHERE hash = @p0 AND fact_type_id = @p1",
-                factReference.Hash, factTypeId);
+                factReference.Hash, factTypeId.Value);
+            return factId.Value;
         }
 
-        private void InsertAncestors(NpgsqlConnection conn, string factId, string predecessorFactId)
+        private void InsertAncestors(NpgsqlConnection conn, int factId, int predecessorFactId)
         {
             conn.ExecuteNonQuery(@"
                 INSERT INTO ancestor (fact_id, ancestor_fact_id)
-                SELECT @p0::int, @p1::int
+                SELECT @p0, @p1
                 UNION
-                SELECT @p0::int, ancestor_fact_id
+                SELECT @p0, ancestor_fact_id
                 FROM ancestor
-                WHERE fact_id = @p1::int
+                WHERE fact_id = @p1
                 ON CONFLICT DO NOTHING
             ", factId, predecessorFactId);
         }
 
-        private void InsertEdge(NpgsqlConnection conn, string roleId, string successorFactId, string predecessorFactId)
+        private void InsertEdge(NpgsqlConnection conn, int roleId, int successorFactId, int predecessorFactId)
         {
             conn.ExecuteNonQuery(
                 "INSERT INTO edge (role_id, successor_fact_id, predecessor_fact_id) VALUES (@p0, @p1, @p2) ON CONFLICT DO NOTHING",
@@ -670,6 +671,7 @@ namespace Jinaga.Store.PostgreSQL
                             ON s.fact_id = f.fact_id
                         LEFT JOIN public_key p
                             ON p.public_key_id = s.public_key_id
+                        ORDER BY f.fact_id
                     ");
                 }
             );
