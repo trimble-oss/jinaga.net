@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
@@ -20,5 +21,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Jinaga.Store.PostgreSQL\Jinaga.Store.PostgreSQL.csproj" />
+    <ProjectReference Include="..\Jinaga\Jinaga.csproj" />
   </ItemGroup>
 </Project>

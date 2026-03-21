@@ -14,6 +14,9 @@ namespace Jinaga.Store.PostgreSQL.Database
 
         public ConnectionFactory(string connectionString)
         {
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new ArgumentException("Connection string cannot be null or empty.", nameof(connectionString));
+
             this.connectionString = connectionString;
             var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
             this.dataSource = dataSourceBuilder.Build();

@@ -12,9 +12,9 @@ using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -414,13 +414,25 @@ namespace Jinaga.Store.PostgreSQL
         /// </summary>
         internal static string ConvertParameterSyntax(string sql)
         {
+            // Find the maximum parameter index to determine the replacement range
+            var matches = Regex.Matches(sql, @"\$(\d+)");
+            if (matches.Count == 0)
+                return sql;
+
+            int maxParam = matches.Cast<System.Text.RegularExpressions.Match>().Max(m => int.Parse(m.Groups[1].Value));
+
             // Replace $N with @p(N-1) for Npgsql
             // Process in reverse order of parameter number to avoid replacing $1 in $10
             var result = sql;
-            for (int i = 100; i >= 1; i--)
+            for (int i = maxParam; i >= 1; i--)
             {
                 result = result.Replace($"${i}", $"@p{i - 1}");
             }
+
+            // Validate all parameters were replaced
+            if (Regex.IsMatch(result, @"\$\d+"))
+                throw new InvalidOperationException("Failed to convert all parameter placeholders in SQL query");
+
             return result;
         }
 
@@ -499,31 +511,28 @@ namespace Jinaga.Store.PostgreSQL
                         VALUES (@p0, @p1)
                         ON CONFLICT (specification_hash)
                         DO UPDATE SET mru_date = @p1
-                    ", specificationHash, mruDate.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+                    ", specificationHash, mruDate.ToUniversalTime());
                 }
             );
-            return Task.FromResult("");
+            return Task.CompletedTask;
         }
 
         public Task<DateTime?> GetMruDate(string specificationHash)
         {
-            string mruDateString = connFactory.WithTxn(
+            var result = connFactory.WithConn(
                 (conn) =>
                 {
-                    return conn.ExecuteScalarString(
+                    return conn.ExecuteScalar(
                         "SELECT mru_date FROM mru WHERE specification_hash = @p0",
                         specificationHash);
                 }
             );
-            DateTime mruDate;
-            if (DateTime.TryParseExact(mruDateString, "yyyy-MM-dd HH:mm:ss", null, DateTimeStyles.AssumeUniversal, out mruDate))
-            {
-                return Task.FromResult((DateTime?)mruDate.ToUniversalTime());
-            }
-            else
+            if (result == null || result == DBNull.Value)
             {
                 return Task.FromResult((DateTime?)null);
             }
+            var mruDate = Convert.ToDateTime(result);
+            return Task.FromResult((DateTime?)DateTime.SpecifyKind(mruDate, DateTimeKind.Utc));
         }
 
         public Task<QueuedFacts> GetQueue()
@@ -728,6 +737,10 @@ namespace Jinaga.Store.PostgreSQL
                 throw new ArgumentException("Purge conditions should not have existential conditions");
             }
 
+            // Parameter $2 (the hash "xxxx") is removed, so we need to remap:
+            // $1 → @p0 (offset -1), $3 → @p1 (offset -2), $4 → @p2 (offset -2), etc.
+            int RemapParam(int originalParam) => originalParam < 2 ? originalParam - 1 : originalParam - 2;
+
             var columns = queryDescription.Outputs
                 .Select((label, index) => $"f{label.FactIndex}.fact_id as trigger{index + 1}")
                 .Join(", ");
@@ -736,9 +749,9 @@ namespace Jinaga.Store.PostgreSQL
             var successorInput = queryDescription.Inputs.Find(input => input.FactIndex == firstEdge.SuccessorFactIndex);
             var firstFactIndex = predecessorInput != null ? predecessorInput.FactIndex : successorInput.FactIndex;
             var writtenFactIndexes = new HashSet<int> { firstFactIndex };
-            var joins = GenerateJoins(queryDescription.Edges, writtenFactIndexes);
+            var joins = GeneratePurgeJoins(queryDescription.Edges, writtenFactIndexes, RemapParam);
             var inputWhereClauses = queryDescription.Inputs
-                .Select(input => $"f{input.FactIndex}.fact_type_id = @p{input.FactTypeParameter - 2}")
+                .Select(input => $"f{input.FactIndex}.fact_type_id = @p{RemapParam(input.FactTypeParameter)}")
                 .Join(" AND ");
 
             var triggerWhereClauses = queryDescription.Outputs
@@ -783,7 +796,7 @@ WHERE fact_id IN (SELECT fact_id FROM targets);";
             return (sql, parameters);
         }
 
-        private static ImmutableList<string> GenerateJoins(ImmutableList<EdgeDescription> edges, HashSet<int> writtenFactIndexes)
+        private static ImmutableList<string> GeneratePurgeJoins(ImmutableList<EdgeDescription> edges, HashSet<int> writtenFactIndexes, Func<int, int> remapParam)
         {
             var joins = ImmutableList<string>.Empty;
             var remainingEdges = edges;
@@ -810,7 +823,7 @@ WHERE fact_id IN (SELECT fact_id FROM targets);";
                             $" JOIN edge e{edge.EdgeIndex}" +
                             $" ON e{edge.EdgeIndex}.predecessor_fact_id = f{edge.PredecessorFactIndex}.fact_id" +
                             $" AND e{edge.EdgeIndex}.successor_fact_id = f{edge.SuccessorFactIndex}.fact_id" +
-                            $" AND e{edge.EdgeIndex}.role_id = @p{edge.RoleParameter - 2}"
+                            $" AND e{edge.EdgeIndex}.role_id = @p{remapParam(edge.RoleParameter)}"
                         );
                     }
                     else
@@ -818,7 +831,7 @@ WHERE fact_id IN (SELECT fact_id FROM targets);";
                         joins = joins.Add(
                             $" JOIN edge e{edge.EdgeIndex}" +
                             $" ON e{edge.EdgeIndex}.predecessor_fact_id = f{edge.PredecessorFactIndex}.fact_id" +
-                            $" AND e{edge.EdgeIndex}.role_id = @p{edge.RoleParameter - 2}"
+                            $" AND e{edge.EdgeIndex}.role_id = @p{remapParam(edge.RoleParameter)}"
                         );
                         joins = joins.Add(
                             $" JOIN fact f{edge.SuccessorFactIndex}" +
@@ -832,7 +845,7 @@ WHERE fact_id IN (SELECT fact_id FROM targets);";
                     joins = joins.Add(
                         $" JOIN edge e{edge.EdgeIndex}" +
                         $" ON e{edge.EdgeIndex}.successor_fact_id = f{edge.SuccessorFactIndex}.fact_id" +
-                        $" AND e{edge.EdgeIndex}.role_id = @p{edge.RoleParameter - 2}"
+                        $" AND e{edge.EdgeIndex}.role_id = @p{remapParam(edge.RoleParameter)}"
                     );
                     joins = joins.Add(
                         $" JOIN fact f{edge.PredecessorFactIndex}" +

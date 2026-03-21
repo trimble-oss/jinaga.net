@@ -103,7 +103,7 @@ namespace Jinaga.Store.PostgreSQL.Database
                     CREATE TABLE IF NOT EXISTS mru (
                         mru_id SERIAL PRIMARY KEY,
                         specification_hash TEXT NOT NULL,
-                        mru_date TEXT NOT NULL
+                        mru_date TIMESTAMP NOT NULL
                     );
 
                     CREATE UNIQUE INDEX IF NOT EXISTS ux_mru
