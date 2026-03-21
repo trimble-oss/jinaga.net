@@ -253,6 +253,7 @@ namespace Jinaga.Store.PostgreSQL
                                 ON s.fact_id = f2.fact_id
                             LEFT JOIN public_key p
                                 ON p.public_key_id = s.public_key_id
+                        ORDER BY fact_id
                         ";
 
                         return conn.ExecuteQuery<FactWithIdAndSignatureFromDb>(sql, parameters.ToArray());
@@ -863,6 +864,11 @@ WHERE fact_id IN (SELECT fact_id FROM targets);";
 
         public Task PurgeDescendants(FactReference purgeRoot, ImmutableList<FactReference> triggers)
         {
+            if (triggers.IsEmpty)
+            {
+                return Task.CompletedTask;
+            }
+
             var factTypes = LoadFactTypesFromReferences(new[] { purgeRoot }.Concat(triggers).ToImmutableList())
                 .ToImmutableDictionary(ft => ft.name, ft => ft.fact_type_id);
             if (!factTypes.ContainsKey(purgeRoot.Type) || triggers.Any(t => !factTypes.ContainsKey(t.Type)))

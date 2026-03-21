@@ -25,9 +25,18 @@ namespace Jinaga.Store.PostgreSQL.Database
 
         private void RunMigrations()
         {
-            using (var conn = dataSource.OpenConnection())
+            try
             {
-                Migration.CreateSchema(conn);
+                using (var conn = dataSource.OpenConnection())
+                {
+                    Migration.CreateSchema(conn);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "Failed to initialize PostgreSQL database schema. Verify the connection string and database accessibility.",
+                    ex);
             }
         }
 
@@ -111,32 +120,38 @@ namespace Jinaga.Store.PostgreSQL.Database
                 using (var reader = cmd.ExecuteReader())
                 {
                     var properties = typeof(T).GetProperties();
+                    // Build column name -> ordinal map once before the row loop
+                    Dictionary<string, int> columnMap = null;
                     while (reader.Read())
                     {
+                        if (columnMap == null)
+                        {
+                            columnMap = new Dictionary<string, int>(reader.FieldCount);
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                columnMap[reader.GetName(i)] = i;
+                            }
+                        }
                         var item = new T();
                         foreach (var property in properties)
                         {
-                            for (int i = 0; i < reader.FieldCount; i++)
+                            if (columnMap.TryGetValue(property.Name, out int ordinal))
                             {
-                                if (reader.GetName(i) == property.Name)
+                                var value = reader.GetValue(ordinal);
+                                if (value != DBNull.Value)
                                 {
-                                    var value = reader.GetValue(i);
-                                    if (value != DBNull.Value)
+                                    if (property.PropertyType == typeof(int) && value is long longVal)
                                     {
-                                        if (property.PropertyType == typeof(int) && value is long longVal)
-                                        {
-                                            property.SetValue(item, (int)longVal);
-                                        }
-                                        else if (property.PropertyType == typeof(int) && value is string strVal)
-                                        {
-                                            property.SetValue(item, int.Parse(strVal));
-                                        }
-                                        else
-                                        {
-                                            property.SetValue(item, Convert.ChangeType(value, property.PropertyType));
-                                        }
+                                        property.SetValue(item, (int)longVal);
                                     }
-                                    break;
+                                    else if (property.PropertyType == typeof(int) && value is string strVal)
+                                    {
+                                        property.SetValue(item, int.Parse(strVal));
+                                    }
+                                    else
+                                    {
+                                        property.SetValue(item, Convert.ChangeType(value, property.PropertyType));
+                                    }
                                 }
                             }
                         }
