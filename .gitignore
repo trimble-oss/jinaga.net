@@ -402,4 +402,7 @@ ASALocalRun/
 .mfractor/
 
 # Local History for Visual Studio
-.localhistory/.council/
+.localhistory/
+
+# Grand Council review artifacts
+.council/
