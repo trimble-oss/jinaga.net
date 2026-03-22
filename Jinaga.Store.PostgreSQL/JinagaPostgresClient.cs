@@ -16,11 +16,6 @@ namespace Jinaga.Store.PostgreSQL
 
     public static class JinagaPostgresClient
     {
-        public static JinagaClient Create()
-        {
-            return Create(_ => { });
-        }
-
         public static JinagaClient Create(Action<JinagaPostgresClientOptions> configure)
         {
             var options = new JinagaPostgresClientOptions();
@@ -28,9 +23,11 @@ namespace Jinaga.Store.PostgreSQL
 
             var loggerFactory = options.LoggerFactory ?? NullLoggerFactory.Instance;
 
-            IStore store = options.ConnectionString == null
-                ? (IStore)new MemoryStore()
-                : new PostgreSQLStore(options.ConnectionString, loggerFactory);
+            if (string.IsNullOrWhiteSpace(options.ConnectionString))
+                throw new InvalidOperationException(
+                    "A PostgreSQL connection string is required. Set the ConnectionString property in JinagaPostgresClientOptions.");
+
+            IStore store = new PostgreSQLStore(options.ConnectionString, loggerFactory);
 
             INetwork network = options.HttpEndpoint == null
                 ? (INetwork)new LocalNetwork()

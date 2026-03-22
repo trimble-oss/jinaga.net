@@ -20,7 +20,15 @@ namespace Jinaga.Store.PostgreSQL.Database
             this.connectionString = connectionString;
             var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
             this.dataSource = dataSourceBuilder.Build();
-            RunMigrations();
+            try
+            {
+                RunMigrations();
+            }
+            catch
+            {
+                ((IDisposable)dataSource).Dispose();
+                throw;
+            }
         }
 
         private void RunMigrations()
