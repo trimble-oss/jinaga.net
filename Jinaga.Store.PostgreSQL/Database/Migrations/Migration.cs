@@ -22,7 +22,7 @@ namespace Jinaga.Store.PostgreSQL.Database
                         fact_id SERIAL PRIMARY KEY,
                         fact_type_id INT NOT NULL REFERENCES fact_type (fact_type_id),
                         hash TEXT NOT NULL,
-                        data TEXT NOT NULL,
+                        data JSONB NOT NULL,
                         date_learned TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
                     );
 
@@ -75,7 +75,8 @@ namespace Jinaga.Store.PostgreSQL.Database
                         signature_id SERIAL PRIMARY KEY,
                         fact_id INT NOT NULL REFERENCES fact (fact_id) ON DELETE CASCADE,
                         public_key_id INT NOT NULL REFERENCES public_key (public_key_id),
-                        signature TEXT NOT NULL
+                        signature TEXT NOT NULL,
+                        date_learned TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
                     );
 
                     CREATE UNIQUE INDEX IF NOT EXISTS ux_signature

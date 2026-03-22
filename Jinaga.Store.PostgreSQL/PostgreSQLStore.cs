@@ -72,7 +72,7 @@ namespace Jinaga.Store.PostgreSQL
                                 newFacts = newFacts.Add(envelope.Fact);
                                 string data = Fact.Canonicalize(envelope.Fact.Fields, envelope.Fact.Predecessors);
                                 conn.ExecuteNonQuery(
-                                    "INSERT INTO fact (fact_type_id, hash, data) VALUES (@p0, @p1, @p2) ON CONFLICT DO NOTHING",
+                                    "INSERT INTO fact (fact_type_id, hash, data) VALUES (@p0, @p1, @p2::jsonb) ON CONFLICT DO NOTHING",
                                     factTypeId.Value, envelope.Fact.Reference.Hash, data);
                                 factId = conn.ExecuteScalarInt(
                                     "SELECT fact_id FROM fact WHERE hash = @p0 AND fact_type_id = @p1",
